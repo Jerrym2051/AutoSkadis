@@ -8,6 +8,8 @@ Press Escape to exit cleanly.
 import pygame
 import sys
 import time
+import json
+import os
 from datetime import datetime
 
 
@@ -38,7 +40,38 @@ time_string = now.strftime("%H:%M:%S")
 current_status = "Idle"
 
 # Retrieved bins - will be updated by API server later
-retrieved_bins = ["M3 screws", "Resistors", "Capacitors", "LEDs", "Washers", "Nuts"]
+retrieved_bins = []
+
+# Action log - stores the 4 most recent actions
+action_log = []
+
+
+def load_state():
+    """Load state from state.json file. Returns defaults on failure."""
+    defaults = {
+        "status": "Idle",
+        "retrieved_bins": [],
+        "action_log": [],
+    }
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        state_path = os.path.join(script_dir, "state.json")
+        with open(state_path, "r") as f:
+            data = json.load(f)
+        return {
+            "status": data.get("status", "Idle"),
+            "retrieved_bins": data.get("retrieved_bins", []),
+            "action_log": data.get("action_log", []),
+        }
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return defaults
+
+
+# Initial state load
+_state = load_state()
+current_status = _state["status"]
+retrieved_bins = _state["retrieved_bins"]
+action_log = _state["action_log"]
 
 # Status color mapping
 STATUS_COLORS = {
@@ -75,6 +108,9 @@ bin_font = pygame.font.Font(None, 16)
 
 # Font for retrieved bins label (size 18)
 bin_label_font = pygame.font.Font(None, 18)
+
+# Font for action log text (size 16)
+action_log_font = pygame.font.Font(None, 16)
 
 # Bin pill configuration
 PILL_WIDTH = 100
@@ -136,11 +172,17 @@ while running:
     title_text = font.render("AutoSkadis", True, (255, 255, 255))
     screen.blit(title_text, (10, 10))
 
-    # Update time string every second
+    # Update time string every second and reload state
     if current_time - last_time_update >= 1:
         last_time_update = current_time
         now = datetime.now()
         time_string = now.strftime("%H:%M:%S")
+
+        # Reload state from state.json every second
+        _state = load_state()
+        current_status = _state["status"]
+        retrieved_bins = _state["retrieved_bins"]
+        action_log = _state["action_log"]
 
     # Always render and blit the time text
     time_text = font.render(time_string, True, (255, 255, 255))
@@ -205,6 +247,24 @@ while running:
                     continue
 
                 _draw_pill(screen, pill_x, pills_y, bin_font, bin_name)
+
+    # Draw Action Log section (left portion of bottom area, before HOME button)
+    ACTION_LOG_Y = 160
+    ACTION_LOG_LABEL_X = 10
+    ACTION_LOG_MAX_WIDTH = BUTTON_X - 10 - 10  # 10px left margin, 10px gap before HOME button
+    ACTION_LOG_LINE_HEIGHT = 20
+
+    # Draw "Action Log:" label
+    action_log_label = action_log_font.render("Action Log:", True, (255, 255, 255))
+    screen.blit(action_log_label, (ACTION_LOG_LABEL_X, ACTION_LOG_Y))
+
+    # Display up to 4 most recent actions (most recent first), one per line
+    recent_actions = action_log[:4]
+    for idx, entry in enumerate(reversed(recent_actions)):
+        log_y = ACTION_LOG_Y + 22 + (idx * ACTION_LOG_LINE_HEIGHT)
+        log_text = f"{entry['time']} - {entry['action']}"
+        log_surface = action_log_font.render(log_text, True, (200, 200, 200))
+        screen.blit(log_surface, (ACTION_LOG_LABEL_X, log_y))
 
     # Draw HOME button (rounded rectangle with manual drawing)
     # Determine button color based on press state
