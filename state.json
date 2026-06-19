@@ -1,0 +1,30 @@
+{
+  "status": "Moving",
+  "retrieved_bins": [
+    "Capacitors",
+    "LEDs",
+    "Diodes",
+    "Zip ties",
+    "M3 screws",
+    "Washers",
+    "Springs"
+  ],
+  "action_log": [
+    {
+      "time": "10:07",
+      "action": "Returned Heat shrink"
+    },
+    {
+      "time": "10:07",
+      "action": "Retrieved Springs"
+    },
+    {
+      "time": "10:07",
+      "action": "Retrieved Washers"
+    },
+    {
+      "time": "10:07",
+      "action": "Returned Fuses"
+    }
+  ]
+}
