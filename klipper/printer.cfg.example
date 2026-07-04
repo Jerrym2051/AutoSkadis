@@ -1,0 +1,90 @@
+[stepper_x]
+step_pin: PC6
+dir_pin: !PC7
+enable_pin: !PB15
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PA2
+position_endstop: 0
+position_max: 200
+homing_speed: 50
+
+[stepper_y]
+step_pin: PB13
+dir_pin: !PB12
+enable_pin: !PB11
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PA3
+position_endstop: 0
+position_max: 200
+homing_speed: 50
+
+[stepper_z]
+step_pin: PB10
+dir_pin: !PB2
+enable_pin: !PB1
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PA4
+position_endstop: 0
+position_max: 200
+homing_speed: 50
+
+[extruder]
+step_pin: PB3
+dir_pin: !PB4
+enable_pin: !PD2
+microsteps: 16
+rotation_distance: 34
+nozzle_diameter: 0.4
+filament_diameter: 1.75
+heater_pin: PA1
+sensor_type: EPCOS 100K B57560G104F
+sensor_pin: PA0
+control: pid
+pid_Kp: 22.2
+pid_Ki: 1.08
+pid_Kd: 114.2
+min_temp: 150
+max_temp: 250
+
+[tmc2209 stepper_x]
+# Example settings only
+uart_pin: PC10
+run_current: 0.58
+
+[tmc2209 stepper_y]
+# Example settings only
+uart_pin: PC11
+run_current: 0.58
+
+[tmc2209 stepper_z]
+# Example settings only
+uart_pin: PC12
+run_current: 0.58
+
+[tmc2209 extruder]
+# Example settings only
+uart_pin: PD2
+run_current: 0.58
+
+[printer]
+kininematics: cartesian
+max_velocity: 300
+max_accel: 3000
+
+[servo gripper]
+pin: PA5
+
+[gcode_macro HOME]
+gcode:
+    G28
+
+[gcode_macro GRIP_OPEN]
+gcode:
+    SET_SERVO SERVO=gripper ANGLE=0
+
+[gcode_macro GRIP_CLOSE]
+gcode:
+    SET_SERVO SERVO=gripper ANGLE=90
