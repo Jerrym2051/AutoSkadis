@@ -12,6 +12,8 @@ import json
 import os
 from datetime import datetime
 
+from picamera2 import Picamera2
+
 
 # 5-second delay to allow the system to boot
 time.sleep(5)
@@ -98,6 +100,33 @@ button_font = pygame.font.Font(None, 16)
 
 # Button state tracking
 button_pressed_time = 0
+button_is_pressed = False
+
+# Camera preview window position and size (3:2 aspect ratio)
+# Position below Retrieved bins, above HOME button area
+# HOME button starts at Y=240, so camera goes from ~Y=160 to ~Y=240
+# For 3:2 ratio: 230x154 fits nicely
+CAMERA_X = 10
+CAMERA_Y = 160
+CAMERA_WIDTH = 230
+CAMERA_HEIGHT = 154  # 3:2 aspect ratio, fits between bins and HOME button
+
+# Camera preview
+camera_preview_surface = None
+cap = None
+last_camera_capture = 0
+CAMERA_CAPTURE_INTERVAL = 1.0 / 20  # 20 FPS for camera
+
+try:
+    cap = Picamera2()
+    config = cap.create_video_configuration(
+        main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": "RGB888"}
+    )
+    cap.configure(config)
+    cap.start()
+    time.sleep(1)  # allow sensor to warm up before first capture
+except Exception:
+    cap = None
 
 # Retrieved bins scrolling animation
 scroll_offset = 0
@@ -155,6 +184,7 @@ def _draw_pill(surface, x, y, text_font, text):
 running = True
 clock = pygame.time.Clock()
 frame_time = 0
+last_frame_surface = None
 
 while running:
     # Get current timestamp
@@ -248,28 +278,44 @@ while running:
 
                 _draw_pill(screen, pill_x, pills_y, bin_font, bin_name)
 
-    # Draw Action Log section (left portion of bottom area, before HOME button)
-    ACTION_LOG_Y = 160
-    ACTION_LOG_LABEL_X = 10
-    ACTION_LOG_MAX_WIDTH = BUTTON_X - 10 - 10  # 10px left margin, 10px gap before HOME button
-    ACTION_LOG_LINE_HEIGHT = 20
+    # Draw camera preview window
+    camera_rect = pygame.Rect(CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT)
+    if cap is not None:
+        # Check if camera overlaps with HOME button area
+        if not camera_rect.colliderect(pygame.Rect(BUTTON_X, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)):
+            # Only capture new frame at 20 FPS to avoid slowing display loop
+            current_time = time.time()
+            if current_time - last_camera_capture >= CAMERA_CAPTURE_INTERVAL:
+                last_camera_capture = current_time
+                try:
+                    frame = cap.capture_array()
+                    frame = frame[:, :, ::-1]  # swap BGR to RGB
+                    frame = frame.transpose(1, 0, 2)
+                    last_frame_surface = pygame.surfarray.make_surface(frame)
+                except Exception as e:
+                    print(f"Camera error: {e}")
 
-    # Draw "Action Log:" label
-    action_log_label = action_log_font.render("Action Log:", True, (255, 255, 255))
-    screen.blit(action_log_label, (ACTION_LOG_LABEL_X, ACTION_LOG_Y))
-
-    # Display up to 4 most recent actions (most recent first), one per line
-    recent_actions = action_log[:4]
-    for idx, entry in enumerate(reversed(recent_actions)):
-        log_y = ACTION_LOG_Y + 22 + (idx * ACTION_LOG_LINE_HEIGHT)
-        log_text = f"{entry['time']} - {entry['action']}"
-        log_surface = action_log_font.render(log_text, True, (200, 200, 200))
-        screen.blit(log_surface, (ACTION_LOG_LABEL_X, log_y))
+            if last_frame_surface is not None:
+                screen.blit(last_frame_surface, (CAMERA_X, CAMERA_Y))
+            else:
+                pygame.draw.rect(screen, (30, 30, 30), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT))
+                pygame.draw.rect(screen, (100, 100, 100), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT), 2)
+        else:
+            # Camera overlaps with HOME button - draw placeholder
+            pygame.draw.rect(screen, (30, 30, 30), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT))
+            pygame.draw.rect(screen, (100, 100, 100), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT), 2)
+    else:
+        # Draw placeholder when camera is unavailable
+        pygame.draw.rect(screen, (30, 30, 30), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT))
+        pygame.draw.rect(screen, (100, 100, 100), (CAMERA_X, CAMERA_Y, CAMERA_WIDTH, CAMERA_HEIGHT), 2)
+        no_cam_text = font.render("No Camera", True, (100, 100, 100))
+        text_x = CAMERA_X + (CAMERA_WIDTH - no_cam_text.get_width()) // 2
+        text_y = CAMERA_Y + (CAMERA_HEIGHT - no_cam_text.get_height()) // 2
+        screen.blit(no_cam_text, (text_x, text_y))
 
     # Draw HOME button (rounded rectangle with manual drawing)
     # Determine button color based on press state
-    current_time = time.time()
-    if current_time - button_pressed_time < 0.2:  # 200ms visual feedback
+    if button_is_pressed:
         button_color = BUTTON_PRESSED_COLOR
     else:
         button_color = BUTTON_NORMAL_COLOR
@@ -310,7 +356,15 @@ while running:
                 BUTTON_Y <= event.pos[1] <= BUTTON_Y + BUTTON_HEIGHT):
                 print("Home button pressed")
                 button_pressed_time = time.time()
+                button_is_pressed = True
+        elif event.type == pygame.MOUSEBUTTONUP:
+            # Check if button was released
+            if (BUTTON_X <= event.pos[0] <= BUTTON_X + BUTTON_WIDTH and
+                BUTTON_Y <= event.pos[1] <= BUTTON_Y + BUTTON_HEIGHT):
+                button_is_pressed = False
 
-# Clean up pygame
+# Clean up pygame and camera
+if cap is not None:
+    cap.stop()
 pygame.quit()
 sys.exit()
