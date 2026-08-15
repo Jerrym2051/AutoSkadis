@@ -1,0 +1,161 @@
+# Plan: Raspberry Pi + L298N Electromagnet Controller
+
+## Constraint driving this design
+Only the **bottom 7 pin rows** of the 40-pin header are accessible — physical
+pins **27–40**. Looking at the pinout, that range contains **no 3V3 or 5V
+power pin** at all, and pins 27/28 are `GPIO0 (ID_SD)` / `GPIO1 (ID_SC)`,
+which are reserved for HAT EEPROM auto-detection and should not be used as
+general-purpose I/O. Everything below is designed around that.
+
+| Physical pin | Signal | Use |
+|---|---|---|
+| 27 | GPIO0 (ID_SD) | **Do not use** (reserved for HAT EEPROM) |
+| 28 | GPIO1 (ID_SC) | **Do not use** (reserved for HAT EEPROM) |
+| 29 | GPIO5 | Spare (status LED / future) |
+| 30 | Ground | **Common ground to L298N GND** |
+| 31 | GPIO6 | `IN1` (direction pin A) |
+| 32 | GPIO12 (PWM0, hardware PWM) | `ENA` (magnet strength / on-off) |
+| 33 | GPIO13 (PWM1) | Spare, or `IN2` if you want reverse-polarity pulses |
+| 34 | Ground | Spare ground |
+| 35 | GPIO19 | `IN2` (direction pin B) |
+| 36 | GPIO16 | Spare (e.g. current-sense interrupt input) |
+| 37 | GPIO26 | Spare |
+| 38 | GPIO20 | Spare |
+| 39 | Ground | Spare ground |
+| 40 | GPIO21 | Spare |
+
+**Why no 5V/3V3 needed from the Pi:** the L298N breakout has its own onboard
+5V regulator fed from the motor supply screw terminals (with a jumper to
+enable it). Since we can't reach a Pi power pin anyway, the L298N's logic
+supply should come from that onboard regulator (jumper ON) or from a separate
+5V source — **not** from the Pi. Only a **ground** connection between Pi and
+L298N is required for the logic signals to be referenced correctly.
+
+## Hardware plan
+
+1. **Power the L298N from an external DC supply** (battery pack or bench
+   supply) sized for the electromagnet's coil current, connected to the
+   L298N's `+12V`/`VMS` and `GND` screw terminals. Leave the "5V-EN" jumper
+   in place so the board self-generates logic 5V — do not connect the Pi's
+   5V to it.
+2. **Common ground:** run a wire from one of the available Pi ground pins
+   (30, 34, or 39) to the L298N `GND` terminal. This is mandatory — without
+   a shared ground reference the GPIO signals won't switch the L298N
+   reliably.
+3. **Signal wiring:**
+   - Pi pin 31 (GPIO6) → L298N `IN1`
+   - Pi pin 35 (GPIO19) → L298N `IN2`
+   - Pi pin 32 (GPIO12) → L298N `ENA`
+   - Electromagnet coil → L298N `OUT1` / `OUT2`
+4. **Only one motor channel is needed** (Channel A: IN1/IN2/ENA/OUT1/OUT2).
+   Channel B on the L298N is unused, so `IN3`/`IN4`/`ENB` on the board can be
+   left disconnected.
+5. Note the L298N drops ~1.4–2V across its H-bridge transistors — factor
+   that into supply voltage choice for the magnet's rated current. The chip
+   also runs hot under sustained current; use with a heatsink and don't run
+   the coil continuously at max current without checking thermal margins.
+
+## Software plan
+
+### Library choice
+Target hardware is a **Raspberry Pi 4**, which simplifies the GPIO story
+considerably compared to a Pi 5:
+
+- Use **`gpiozero`** as the primary library. It's the Raspberry Pi
+  Foundation's recommended API for new projects, is pre-installed on
+  Raspberry Pi OS, and on a Pi 4 it defaults to the standard pin factory
+  with no extra configuration — none of the Pi 5 `LGPIOFactory(chip=4)`
+  workaround is needed here.
+- `gpiozero`'s default backend on Pi 4 is `RPi.GPIO` under the hood (or
+  `lgpio`/`pigpio` if installed), so **`RPi.GPIO` also still works directly**
+  on a Pi 4 if the agent or a future maintainer prefers the lower-level API.
+  Either is a valid low-level choice; this plan uses `gpiozero` for its
+  cleaner PWM/output abstractions and easier testing (see Testing section).
+- Install with: `sudo apt install python3-gpiozero` (preferred, matches the
+  OS-managed environment) or `pip install gpiozero` in a virtualenv.
+  `RPi.GPIO` is preinstalled on Raspberry Pi Pi OS images for Pi 4 as well,
+  no `rpi-lgpio` shim or `lgpio` chip-number handling required.
+- The running user must be in the `gpio` group (default `pi`/first-run user
+  already is) to access `/dev/gpiomem` without `sudo`.
+
+### Program architecture
+
+```
+electromagnet/
+├── magnet_controller.py   # core class wrapping the L298N channel
+├── cli.py                 # command-line entry point
+├── config.py               # pin numbers, safety limits, as constants
+└── tests/
+    └── test_magnet_controller.py   # unit tests with gpiozero's mock pin factory
+```
+
+**`MagnetController` class responsibilities:**
+- Wraps `PWMOutputDevice(ENA_PIN)` for strength (0.0–1.0 duty cycle) and two
+  `DigitalOutputDevice`s for `IN1`/`IN2`.
+- `energize(strength: float = 1.0, polarity: str = "forward")` — sets
+  IN1/IN2 for the requested polarity, ramps or jumps `ENA` PWM value to
+  `strength`.
+- `de_energize()` — sets `ENA` duty to 0 and both IN pins low (coasts the
+  coil down rather than commanding a hard brake through the H-bridge, unless
+  a fast-shutoff / demagnetizing pulse is explicitly wanted).
+- `set_strength(strength: float)` — adjusts PWM duty live without touching
+  direction pins, for variable magnet force.
+- **Safety timeout:** an internal timer (thread or `gpiozero`'s
+  `Device`-safe approach) that automatically de-energizes if `energize()` is
+  active longer than a configurable max (e.g. 60s), to avoid an
+  accidentally-left-on coil overheating. Make this a keyword you can disable
+  for legitimate long holds, defaulting to on.
+- Context-manager support (`__enter__`/`__exit__`) and a `close()`/
+  `cleanup()` method that always de-energizes and releases the GPIO pins,
+  called on normal exit, `KeyboardInterrupt`, and `atexit`.
+- Never leave the coil energized after the process exits or crashes —
+  register `atexit.register(controller.cleanup)`.
+
+**CLI (`cli.py`):**
+- `python -m electromagnet on [--strength 0.0-1.0] [--polarity forward|reverse] [--duration SECONDS]`
+- `python -m electromagnet off`
+- `python -m electromagnet pulse --on-time --off-time --cycles` (for tasks
+  like repeated pick/drop cycles)
+- Use `argparse`; validate strength is clamped to [0.0, 1.0] before writing
+  to the PWM device.
+
+**Config (`config.py`):**
+- Pin constants named clearly (`ENA_PIN = 12`, `IN1_PIN = 6`, `IN2_PIN = 19`)
+  using **BCM numbering** (gpiozero's default), matching physical pins
+  32/31/35 from the table above.
+- `MAX_ON_SECONDS` safety default.
+- A comment block explaining the pin-availability constraint (rows 27-40
+  only, no power pins, GPIO0/1 reserved) so future maintainers don't
+  accidentally repurpose pins 27/28.
+
+### Testing
+- Use `gpiozero.pins.mock.MockFactory` to unit test `MagnetController`
+  without real hardware: assert PWM duty cycle and IN pin states after
+  calling `energize`/`de_energize`/`set_strength`.
+- Add an integration test script (manual, hardware-in-the-loop) that ramps
+  strength 0→100%→0 over a few seconds for a bench check.
+
+### Task checklist for the coding agent
+1. Scaffold the package structure above.
+2. Implement `config.py` with pin constants and safety limits.
+3. Implement `MagnetController` in `magnet_controller.py` with gpiozero,
+   including safety timeout and cleanup-on-exit.
+4. Implement `cli.py` with `on` / `off` / `pulse` subcommands.
+5. Write unit tests using `MockFactory`.
+6. Write a short `README.md` covering: wiring diagram description, jumper
+   setting on the L298N, install steps (`sudo apt install python3-gpiozero`
+   on Raspberry Pi OS, or `pip install gpiozero` in a venv — no Pi 5-specific
+   packages needed), and usage examples.
+7. Manually verify on hardware: confirm common ground is connected, confirm
+   coil polarity, confirm PWM strength scaling feels linear/expected, and
+   confirm the safety timeout actually cuts power.
+
+## Safety notes to carry into the implementation
+- Never wire anything to physical pins 27/28 (GPIO0/1) — they're for HAT ID
+  EEPROM detection and misuse can interfere with boot-time HAT probing.
+- Do not connect L298N's 5V logic output back to the Pi, or a Pi supply pin
+  to the L298N — this row range doesn't expose one anyway, so this should
+  be a non-issue as long as wiring follows the table above.
+- Always keep a shared ground between Pi and L298N.
+- Software must guarantee the coil de-energizes on crash/exit — this is the
+  most common way electromagnet projects overheat a coil or drain a battery.
