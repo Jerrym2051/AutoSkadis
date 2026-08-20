@@ -1,92 +1,70 @@
+"""Application adapter for the L298N electromagnet controller."""
+
 import time
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from app.config import FAKE_MODE, MAGNET_PINS, RELEASE_PULSE_DURATION
+from app.config import (
+    FAKE_MODE, MAGNET_CHANNEL, MAGNET_ENA_PIN, MAGNET_ENB_PIN,
+    MAGNET_IN1_PIN, MAGNET_IN2_PIN, MAGNET_IN3_PIN, MAGNET_IN4_PIN,
+    MAGNET_MAX_ON_SECONDS, RELEASE_PULSE_DURATION,
+)
 
-try:
-    import RPi.GPIO as GPIO
-except ImportError:  # pragma: no cover - normal on desktop computers
-    GPIO = None
+if TYPE_CHECKING:
+    from app.magnet_controller import MagnetController
 
-
-_pin_setup_done = False
+_controller: Optional["MagnetController"] = None
 
 
 def setup_magnets() -> None:
-    """Configure GPIO pins for magnet control."""
-    global _pin_setup_done
+    global _controller
     if FAKE_MODE:
         print("[FAKE MAGNETS] setup")
-        _pin_setup_done = True
         return
-
-    if GPIO is None:
-        raise RuntimeError("RPi.GPIO is not available on this machine")
-
-    GPIO.setmode(GPIO.BCM)
-    for pin in MAGNET_PINS:
-        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-    _pin_setup_done = True
+    if _controller is None:
+        try:
+            from app.magnet_controller import MagnetController
+        except ImportError as exc:
+            raise RuntimeError("gpiozero is required for real magnet control") from exc
+        _controller = MagnetController(
+            ena_pin=MAGNET_ENA_PIN, in1_pin=MAGNET_IN1_PIN, in2_pin=MAGNET_IN2_PIN,
+            enb_pin=MAGNET_ENB_PIN if MAGNET_ENB_PIN > 0 else None,
+            in3_pin=MAGNET_IN3_PIN, in4_pin=MAGNET_IN4_PIN,
+            max_on_seconds=MAGNET_MAX_ON_SECONDS,
+        )
 
 
 def magnets_on() -> None:
-    """Turn magnets on with forward polarity."""
-    if not _pin_setup_done:
-        setup_magnets()
-
+    setup_magnets()
     if FAKE_MODE:
         print("[FAKE MAGNETS] on")
-        return
-
-    if GPIO is None:
-        raise RuntimeError("RPi.GPIO is not available on this machine")
-
-    GPIO.output(MAGNET_PINS[0], GPIO.HIGH)
-    GPIO.output(MAGNET_PINS[1], GPIO.LOW)
+    else:
+        _controller.energize(channel=MAGNET_CHANNEL)
 
 
 def magnets_off() -> None:
-    """Turn magnets off by driving all pins low."""
-    if not _pin_setup_done:
-        setup_magnets()
-
     if FAKE_MODE:
         print("[FAKE MAGNETS] off")
         return
-
-    if GPIO is None:
-        raise RuntimeError("RPi.GPIO is not available on this machine")
-
-    for pin in MAGNET_PINS:
-        GPIO.output(pin, GPIO.LOW)
+    setup_magnets()
+    _controller.de_energize(channel=MAGNET_CHANNEL)
 
 
 def release_pulse() -> None:
-    """Apply a short reverse-polarity pulse to release the bin."""
-    if not _pin_setup_done:
-        setup_magnets()
-
+    setup_magnets()
     if FAKE_MODE:
         print("[FAKE MAGNETS] release pulse")
         return
-
-    if GPIO is None:
-        raise RuntimeError("RPi.GPIO is not available on this machine")
-
-    GPIO.output(MAGNET_PINS[0], GPIO.LOW)
-    GPIO.output(MAGNET_PINS[1], GPIO.HIGH)
+    _controller.energize(
+        polarity="reverse", channel=MAGNET_CHANNEL, timeout=RELEASE_PULSE_DURATION
+    )
     time.sleep(RELEASE_PULSE_DURATION)
-    magnets_off()
+    _controller.de_energize(channel=MAGNET_CHANNEL)
 
 
 def cleanup_magnets() -> None:
-    """Reset GPIO and clean up the pins."""
+    global _controller
     if FAKE_MODE:
         print("[FAKE MAGNETS] cleanup")
-        return
-
-    if GPIO is None:
-        return
-
-    magnets_off()
-    GPIO.cleanup()
+    elif _controller is not None:
+        _controller.cleanup()
+        _controller = None

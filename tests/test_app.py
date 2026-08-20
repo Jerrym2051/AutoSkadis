@@ -6,8 +6,7 @@ def test_fake_mode_and_bins_work(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "true")
     monkeypatch.setenv("BINS_FILE", str(tmp_path / "bins.json"))
 
-    import config
-    import bins
+    from app import bins, config
 
     importlib.reload(config)
     importlib.reload(bins)
