@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Zerui Ma
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Full license: see LICENSE in the repository root.
+
 """
 Raspberry Pi 4 Display Script for Waveshare 3.5 inch LCD (480x320)
 Uses pygame to create a fullscreen window with black background.

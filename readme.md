@@ -1,5 +1,7 @@
 # AutoSkadis
 
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](https://polyformproject.org/licenses/noncommercial/1.0.0)
+
 **AutoSkadis** is a Klipper-firmware 3D-printer-based robot that **retrieves and returns bins from a pegboard parts bin** (screws, resistors, LEDs, jumpers, etc.). It travels over an X/Y/Z cartesian gantry, uses a servo gripper plus **electromagnets** to pick up and release bins, locates bins with **AprilTags**, and exposes a simple **REST API**. A **pygame** dashboard on a small LCD shows live status, retrieved bins, a camera preview, and a HOME button.
 
 > A work in progress. Hardware runs on a **Raspberry Pi 4**; the software also runs fully in **FAKE_MODE** on any OS so you can develop without the robot.
@@ -313,7 +315,11 @@ Run the suite on a desktop without hardware — no GPIO is required thanks to th
 
 AutoSkadis is a **work in progress**. The display/simulator path is functional end-to-end, and the API + magnet controller are unit-tested in `FAKE_MODE`; the full hardware loop (API → Klipper → magnets) is still being integrated.
 
-No `LICENSE` file is currently included.
+### License
+
+AutoSkadis is licensed under the **PolyForm Noncommercial License 1.0.0** (`SPDX: PolyForm-Noncommercial-1.0.0`). See the [LICENSE](LICENSE) file in the repository root for the full text, or the official license page at <https://polyformproject.org/licenses/noncommercial/1.0.0>.
+
+> **Noncommercial use only.** You may use, modify, and distribute this software for personal, educational, research, and other noncommercial purposes. Commercial use is **not** permitted under this license.
 
 
 

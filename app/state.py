@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Zerui Ma
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Full license: see LICENSE in the repository root.
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
